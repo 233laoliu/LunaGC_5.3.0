@@ -1,0 +1,51 @@
+name: Build Server JAR
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # 使用 Ubuntu 环境
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'  # 或 'adopt', 'zulu', 'corretto'
+        
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      
+    - name: Build server JAR
+      run: ./gradlew jar
+      
+    - name: Generate handbook (optional)
+      run: ./gradlew generateHandbook
+      continue-on-error: true  # 手册生成失败时不中断构建
+      
+    - name: Upload server JAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: server-jar
+        path: |
+          *.jar
+          !gradle-wrapper.jar
+        retention-days: 30
+        
+    - name: Upload handbook (if generated)
+      uses: actions/upload-artifact@v4
+      with:
+        name: handbook
+        path: |
+          **/handbook/**/*.html
+          **/handbook/**/*.md
+        retention-days: 30
+        if-no-files-found: ignore
