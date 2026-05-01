@@ -5,47 +5,173 @@ on:
     branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      skipHandbook:
+        description: 'Skip handbook generation (-PskipHandbook=1)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest  # 使用 Ubuntu 环境
+  build-linux:
+    name: Build on Ubuntu Linux
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'  # 或 'adopt', 'zulu', 'corretto'
+      - name: Checkout code
+        uses: actions/checkout@v4
         
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-      
-    - name: Build server JAR
-      run: ./gradlew jar
-      
-    - name: Generate handbook (optional)
-      run: ./gradlew generateHandbook
-      continue-on-error: true  # 手册生成失败时不中断构建
-      
-    - name: Upload server JAR
-      uses: actions/upload-artifact@v4
-      with:
-        name: server-jar
-        path: |
-          *.jar
-          !gradle-wrapper.jar
-        retention-days: 30
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Display Java version
+        run: java -version
         
-    - name: Upload handbook (if generated)
-      uses: actions/upload-artifact@v4
-      with:
-        name: handbook
-        path: |
-          **/handbook/**/*.html
-          **/handbook/**/*.md
-        retention-days: 30
-        if-no-files-found: ignore
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        
+      - name: Check gradlew permissions
+        run: ls -la gradlew
+        
+      - name: Build server JAR
+        run: |
+          if [ "${{ github.event.inputs.skipHandbook }}" = "true" ]; then
+            echo "Building with -PskipHandbook=1"
+            ./gradlew jar -PskipHandbook=1
+          else
+            echo "Building with handbook generation"
+            ./gradlew jar
+          fi
+          
+      - name: Generate handbook (if not skipped)
+        if: github.event.inputs.skipHandbook != 'true'
+        run: |
+          echo "Generating handbook..."
+          ./gradlew generateHandbook || echo "Handbook generation failed, continuing..."
+        continue-on-error: true
+        
+      - name: List generated JAR files
+        run: |
+          echo "Looking for JAR files in project root..."
+          find . -maxdepth 2 -name "*.jar" -not -name "gradle-wrapper.jar" -type f
+          
+      - name: Upload server JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-jar-linux
+          path: |
+            *.jar
+            **/build/libs/*.jar
+          retention-days: 30
+          
+      - name: Upload handbook (if generated)
+        if: github.event.inputs.skipHandbook != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: handbook-linux
+          path: |
+            **/handbook/**/*.html
+            **/handbook/**/*.md
+            **/build/docs/**/*
+          retention-days: 30
+          if-no-files-found: ignore
+
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Display Java version
+        run: java -version
+        
+      - name: Build server JAR (Windows)
+        shell: cmd
+        run: |
+          if "${{ github.event.inputs.skipHandbook }}" == "true" (
+            echo Building with -PskipHandbook=1
+            .\gradlew.bat jar -PskipHandbook=1
+          ) else (
+            echo Building with handbook generation
+            .\gradlew.bat jar
+          )
+          
+      - name: Generate handbook (Windows, if not skipped)
+        if: github.event.inputs.skipHandbook != 'true'
+        shell: cmd
+        run: |
+          echo Generating handbook...
+          .\gradlew.bat generateHandbook
+        continue-on-error: true
+        
+      - name: List generated JAR files (Windows)
+        shell: powershell
+        run: |
+          Write-Host "Looking for JAR files in project root..."
+          Get-ChildItem -Path . -Filter "*.jar" -Recurse -Depth 2 | Where-Object { $_.Name -ne "gradle-wrapper.jar" } | ForEach-Object { Write-Host $_.FullName }
+          
+      - name: Upload server JAR artifact (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-jar-windows
+          path: |
+            *.jar
+            **/build/libs/*.jar
+          retention-days: 30
+          
+      - name: Upload handbook (Windows, if generated)
+        if: github.event.inputs.skipHandbook != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: handbook-windows
+          path: |
+            **/handbook/**/*.html
+            **/handbook/**/*.md
+            **/build/docs/**/*
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # 可选：快速构建（仅JAR，无手册）
+  quick-build:
+    name: Quick Build (JAR only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        
+      - name: Quick build (skip handbook)
+        run: ./gradlew jar -PskipHandbook=1
+        
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-jar-quick
+          path: |
+            *.jar
+            **/build/libs/*.jar
+          retention-days: 7
